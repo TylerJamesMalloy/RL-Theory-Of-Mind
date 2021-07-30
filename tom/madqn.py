@@ -56,8 +56,6 @@ class MADQN():
             callback=None,
         )
 
-        print(callback)
-
         while True:
             current_agent_index = env.agents.index(env.agent_selection)
             episode_step += 1
@@ -68,7 +66,7 @@ class MADQN():
                 return final_ep_ag_rewards
 
             obs = env.observe(agent=player_key)['observation'].flatten()
-            mask = mask=env.observe(agent=player_key)['action_mask']
+            mask = env.observe(agent=player_key)['action_mask']
             action, _ = trainer.predict(observation = obs, mask=mask)
             
             env.step(action)
@@ -270,6 +268,7 @@ class DQN(OffPolicyAlgorithm):
         observation: np.ndarray,
         mask: Optional[np.ndarray] = None,
         deterministic: bool = False,
+        state: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Overrides the base_class predict function to allow for action masking 
@@ -390,11 +389,22 @@ class DQN(OffPolicyAlgorithm):
                     # Sample a new noise matrix
                     self.actor.reset_noise()
 
+                agent = env.get_attr('agent_selection')[0]
+                agent_index = env.get_attr('agents')[0].index(agent)
                 # Select action randomly or according to policy
-                action, buffer_action = self._sample_action(learning_starts, action_noise)
+                mask = env.env_method('observe',agent=agent)[0]['action_mask']
+                if(np.sum(mask) == 0):
+                    print("Error: Got empty mask")
+                    env.env_method('reset')
+                    continue
+                action, buffer_action = self._sample_action(learning_starts, action_noise, mask)
 
                 # Rescale and perform action
-                new_obs, reward, done, infos = env.step(action)
+                env.step_async([action])
+                reward = env.get_attr('rewards')[0][agent]
+                done = env.get_attr('dones')[0][agent] 
+                infos = [env.get_attr('infos')[0][agent]]
+                new_obs = env.env_method('observe',agent=agent)[0]['observation']
 
                 self.num_timesteps += 1
                 episode_timesteps += 1
@@ -414,6 +424,7 @@ class DQN(OffPolicyAlgorithm):
                 # Store data in replay buffer (normalized action and unnormalized observation)
                 self._store_transition(replay_buffer, buffer_action, new_obs, reward, done, infos)
 
+                self._total_timesteps = self._total_timesteps if self._total_timesteps != 0 else 1  
                 self._update_current_progress_remaining(self.num_timesteps, self._total_timesteps)
 
                 # For DQN, check if the target network should be updated
@@ -443,6 +454,51 @@ class DQN(OffPolicyAlgorithm):
         callback.on_rollout_end()
 
         return RolloutReturn(mean_reward, num_collected_steps, num_collected_episodes, continue_training)
+
+    def _sample_action(
+        self, learning_starts: int, action_noise: Optional[ActionNoise] = None, mask = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Sample an action according to the exploration policy.
+        This is either done by sampling the probability distribution of the policy,
+        or sampling a random action (from a uniform distribution over the action space)
+        or by adding noise to the deterministic output.
+
+        :param action_noise: Action noise that will be used for exploration
+            Required for deterministic policy (e.g. TD3). This can also be used
+            in addition to the stochastic policy for SAC.
+        :param learning_starts: Number of steps before learning for the warm-up phase.
+        :return: action to take in the environment
+            and scaled action that will be stored in the replay buffer.
+            The two differs when the action space is not normalized (bounds are not [-1, 1]).
+        """
+        # Select action randomly or according to policy
+        if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
+            # Warmup phase
+            #unscaled_action = np.array([self.action_space.sample()])
+            unscaled_action = np.random.choice(np.nonzero(mask)[0])
+        else:
+            # Note: when using continuous actions,
+            # we assume that the policy uses tanh to scale the action
+            # We use non-deterministic action in the case of SAC, for TD3, it does not matter
+            unscaled_action, _ = self.predict(self._last_obs, deterministic=False, mask=mask)
+
+        # Rescale the action from [low, high] to [-1, 1]
+        if isinstance(self.action_space, gym.spaces.Box):
+            scaled_action = self.policy.scale_action(unscaled_action)
+
+            # Add noise to the action (improve exploration)
+            if action_noise is not None:
+                scaled_action = np.clip(scaled_action + action_noise(), -1, 1)
+
+            # We store the scaled action in the buffer
+            buffer_action = scaled_action
+            action = self.policy.unscale_action(scaled_action)
+        else:
+            # Discrete case, no need to normalize or clip
+            buffer_action = unscaled_action
+            action = buffer_action
+        return action, buffer_action
 
     def _excluded_save_params(self) -> List[str]:
         return super(DQN, self)._excluded_save_params() + ["q_net", "q_net_target"]
