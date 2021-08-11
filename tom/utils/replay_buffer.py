@@ -26,6 +26,7 @@ class ReplayBuffer():
         self.dones = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.handle_timeout_termination = handle_timeout_termination
         self.timeouts = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.pos = 0
 
     def add(
         self,

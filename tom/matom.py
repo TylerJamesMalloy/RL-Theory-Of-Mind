@@ -7,9 +7,10 @@ from gym import spaces
 from torch.nn import functional as F
 from tom.utils.replay_buffer import ReplayBuffer
 from tom.utils.tom import MindModel
+from tom.utils.utils import get_unobserved_shape, get_concatonated_shape
 
 class MATOM():
-    def __init__(self, env, attention_size=10):
+    def __init__(self, env, attention_size=20):
         env.reset()
         self.env = env 
         agents = []
@@ -42,9 +43,9 @@ class MATOM():
             player_key = env.agent_selection 
             
             obs = env.observe(agent=player_key)['observation']
-
             mask = env.observe(agent=player_key)['action_mask']
-            action, _ = agent.predict(obs = obs, mask=mask)
+
+            action, _ = agent.predict(obs=obs, mask=mask)
             
             env.step(action)
             new_obs = env.observe(agent=player_key)['observation']
@@ -81,23 +82,38 @@ class TOM():
                     action_space,
                     agent_key,
                     attention_size,
-                    dqn_layers = [64,64]):
+                    dqn_layers = [64,64],
+                    gamma = 1-1e-3):
         self.env = env
         self.replay_buffer = ReplayBuffer(buffer_size = int(1e6), observation_space = observation_space, action_space = action_space)
         self.agent_key = agent_key
         self.agent_index = env.agents.index(agent_key)
         self.agent_models = []
         self.attention_size = attention_size
+        self.gamma = gamma
 
         for tom_agent_key in env.agents:
             model = MindModel(env, 
-                        observation_space=env.observation_spaces[tom_agent_key]['observation'],
+                        observation_space=get_concatonated_shape(env), #env.observation_spaces[tom_agent_key]['observation'],
                         action_space=env.action_spaces[tom_agent_key],
                         attention_size=attention_size,
                         dqn_layers=dqn_layers)
             self.agent_models.append(model)
         
         self.mindModel = self.agent_models[self.agent_index]
+    
+    def masked_softmax(self, vec, mask, dim=0, epsilon=1e-12):
+        exps = th.exp(vec).detach().numpy() 
+        masked_exps = exps * mask
+        masked_sums = masked_exps.sum(dim) + epsilon
+        return (masked_exps/masked_sums)
+    
+    def augment_observation(self, obs):
+        for agent in self.agent_models:
+            belief = agent.predict_beliefs()
+            belief = np.reshape(belief, get_unobserved_shape(self.env)) 
+            obs = np.append(obs, belief, axis=0)
+        return obs
 
     def predict(self, obs, mask):
         # list possible actions
@@ -105,36 +121,60 @@ class TOM():
         # loop: next agent's possible actions 
         # get my next turn predicted value
         # roll back to estimate action values 
-        rollout_count = 0
-        rollouts = 1000
+        rollout_steps = 0
+        rollouts = 100
         obs = obs.astype('float64')
+        base_copy = copy.deepcopy(self.env)
+        current_copy = copy.deepcopy(self.env)
+        depth_limit = 5
+        current_depth = 0
+        q_estimates = [[]] * len(mask)
+        estimated_action = None 
+        original_mask = mask
 
-        while rollout_count < rollouts:
-            for agent in self.agent_models:
-                obs += agent.predict_beliefs().data.numpy()
+        while rollout_steps < rollouts:
+            rollout_steps += 1
+            current_depth += 1
+            # Get current player 
+            current_agent_index = self.env.agents.index(self.env.agent_selection)
+            agent = self.agent_models[current_agent_index]
+            # Augment state space with beliefs 
+            augmented_obs = self.augment_observation(obs)
+            # Predict current player q_values 
+            q_values = agent.q_values(augmented_obs)
+            # Get current action mask 
+            mask = current_copy.observe(agent=self.env.agent_selection)['action_mask']
+            if(np.sum(mask) == 0): # Game ended
+                current_depth = 0
+                current_copy = base_copy
+                estimated_action = None
+            # Sample action from q_values 
+            action_sampling = self.masked_softmax(q_values, mask)
+            action = np.random.choice(len(mask), 1, p=action_sampling)[0]
+            # Perform action: alternatively use state transition function 
+            current_copy.step(action)
+            # Add reward plus discounted next observation q_value to action value estimate 
+            if(estimated_action is None): estimated_action = action
+            # Update state information 
+            rew_n, done_n, info_n = current_copy.rewards, current_copy.dones, current_copy.infos
+            reward = rew_n[self.agent_key]
+            new_obs = current_copy.observe(agent=self.env.agent_selection)['observation']
+            augmented_new_obs = self.augment_observation(new_obs)
+            next_obs_q = agent.q_values(augmented_new_obs)
+            q_estimates[estimated_action].append(reward + self.gamma * np.max(next_obs_q.detach().numpy()))
 
-            current_player = self.env.agent_selection
-            q_values = self.mindModel.q_values(obs)
-
-            
-
-            for action, possible_action in enumerate(mask):
-                
-                next_obs = []
-                if(possible_action):
-                    env_copy = copy.deepcopy(self.env)
-                    env_copy.step(action)
-
-                    new_obs = env_copy.observe(agent=current_player)['observation']
-                    next_obs.append(new_obs)
-                    
-                    print(next_obs)
-                    assert(False)
-
+            if(all(done_n.values()) or current_depth >= depth_limit):
+                current_depth = 0
+                current_copy = base_copy
+                estimated_action = None
         
+        q_estimates = [np.mean(i) for i in q_estimates]
+        action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
+        action = np.random.choice(len(original_mask), 1, p=action_sampling)[0]
 
-        return 
+        return (action, None)
    
     def __on_step():
+        # train all models 
         return 
     
