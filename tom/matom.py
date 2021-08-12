@@ -5,7 +5,6 @@ from torch import nn
 import gym
 from gym import spaces
 from torch.nn import functional as F
-from tom.utils.replay_buffer import ReplayBuffer
 from tom.utils.tom import MindModel
 from tom.utils.utils import get_unobserved_shape, get_concatonated_shape
 
@@ -22,6 +21,8 @@ class MATOM():
                             attention_size=attention_size))
             
         self.agents = agents
+
+
     
     def learn(self, timesteps):
         env = self.env 
@@ -41,26 +42,37 @@ class MATOM():
             current_agent_index = env.agents.index(env.agent_selection)
             agent = self.agents[current_agent_index]
             player_key = env.agent_selection 
+
+            trainers_obs = []
+            for trainer in self.agents:
+                trainer_obs = env.observe(agent=trainer.agent_key)['observation']
+                trainer_obs = trainer.augment_observation(trainer_obs)
+                trainers_obs.append(trainer_obs)
             
             obs = env.observe(agent=player_key)['observation']
             mask = env.observe(agent=player_key)['action_mask']
 
             action, _ = agent.predict(obs=obs, mask=mask)
-            
             env.step(action)
-            new_obs = env.observe(agent=player_key)['observation']
 
+            new_obs = env.observe(agent=player_key)['observation']
             rew_n, done_n, info_n = env.rewards, env.dones, env.infos
-            player_info = info_n.get(player_key)
+            player_info = [info_n.get(player_key)]
             done = done_n.get(player_key)
             rew_array = list(rew_n.values())
             rew = rew_array[current_agent_index]
             for agent_index, agent_reward in enumerate(rew_array):
                 agent_rewards[agent_index][0] += agent_reward
 
-            # Store data in replay buffer
-            agent.replay_buffer.add(obs,new_obs,action,rew,done,[player_info])
-            agent._on_step()
+            for trainer in self.agents:
+                trainer_key = env.agents.index(trainer.agent_key)
+                trainer_obs = trainers_obs[trainer_key]
+                trainer_new_obs = env.observe(agent=trainer.agent_key)['observation']
+                trainer_new_obs = trainer.augment_observation(trainer_new_obs)
+
+                trainer.observe(trainer_key,trainer_obs,trainer_new_obs,action,mask,rew,done,player_info)
+                trainer._on_step()
+
             #trainer.train(batch_size=trainer.batch_size, gradient_steps=trainer.gradient_steps)
             
             if(all(done_n.values())): # game is over
@@ -85,7 +97,7 @@ class TOM():
                     dqn_layers = [64,64],
                     gamma = 1-1e-3):
         self.env = env
-        self.replay_buffer = ReplayBuffer(buffer_size = int(1e6), observation_space = observation_space, action_space = action_space)
+        
         self.agent_key = agent_key
         self.agent_index = env.agents.index(agent_key)
         self.agent_models = []
@@ -115,25 +127,22 @@ class TOM():
             obs = np.append(obs, belief, axis=0)
         return obs
 
+    def observe(self,trainer_key,obs,next_obs,action,mask,reward,done,infos):
+        self.agent_models[trainer_key].observe(obs,next_obs,action,mask,reward,done,infos)
+
     def predict(self, obs, mask):
-        # list possible actions
-        # possible next states 
-        # loop: next agent's possible actions 
-        # get my next turn predicted value
-        # roll back to estimate action values 
         rollout_steps = 0
-        rollouts = 100
+        rollouts = 10
         obs = obs.astype('float64')
         base_copy = copy.deepcopy(self.env)
         current_copy = copy.deepcopy(self.env)
-        depth_limit = 5
+        depth_limit = 8
         current_depth = 0
         q_estimates = [[]] * len(mask)
         estimated_action = None 
         original_mask = mask
 
         while rollout_steps < rollouts:
-            rollout_steps += 1
             current_depth += 1
             # Get current player 
             current_agent_index = self.env.agents.index(self.env.agent_selection)
@@ -144,12 +153,15 @@ class TOM():
             q_values = agent.q_values(augmented_obs)
             # Get current action mask 
             mask = current_copy.observe(agent=self.env.agent_selection)['action_mask']
-            if(np.sum(mask) == 0): # Game ended
-                current_depth = 0
-                current_copy = base_copy
-                estimated_action = None
             # Sample action from q_values 
             action_sampling = self.masked_softmax(q_values, mask)
+            if(np.sum(mask) == 0 or np.sum(action_sampling) == 0): # Game ended
+                print("ERROR: Game ended erroneously")
+                current_depth = 0
+                current_copy = copy.deepcopy(base_copy)
+                estimated_action = None
+                rollout_steps += 1
+                continue 
             action = np.random.choice(len(mask), 1, p=action_sampling)[0]
             # Perform action: alternatively use state transition function 
             current_copy.step(action)
@@ -165,8 +177,9 @@ class TOM():
 
             if(all(done_n.values()) or current_depth >= depth_limit):
                 current_depth = 0
-                current_copy = base_copy
+                current_copy = copy.deepcopy(base_copy)
                 estimated_action = None
+                rollout_steps += 1
         
         q_estimates = [np.mean(i) for i in q_estimates]
         action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
@@ -174,7 +187,7 @@ class TOM():
 
         return (action, None)
    
-    def __on_step():
-        # train all models 
-        return 
+    def _on_step(self):
+        for trainer in self.agent_models:
+            trainer.on_step()
     

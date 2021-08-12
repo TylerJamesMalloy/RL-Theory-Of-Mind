@@ -1,4 +1,5 @@
 import numpy as np 
+from gym import spaces
 
 # Todo: change this to a helper class with get functions 
 
@@ -27,7 +28,6 @@ def get_compressed_obs(env, obs, attention_idxs):
         compressed_obs = []
 
         # TODO: perform logic on beliefs? 
-
         for tile in attention_idxs:
             tile_index = tile % 34
             hand_index = int(tile / 34)

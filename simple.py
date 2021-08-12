@@ -11,4 +11,10 @@ env.reset()
 
 model = MATOM(env)
 
-model.learn(100000)
+start_time = time.time()
+
+model.learn(1000)
+
+print("--- %s seconds ---" % (time.time() - start_time))
+
+print("done")

@@ -20,7 +20,8 @@ class ReplayBuffer():
         self.obs_shape = observation_space.shape
         self.action_dim = len(action_space.shape)
         self.observations = np.zeros((self.buffer_size, self.n_envs) + self.obs_shape, dtype=observation_space.dtype)
-        self.masks = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=action_space.dtype)
+        self.next_observations = np.zeros((self.buffer_size, self.n_envs) + self.obs_shape, dtype=observation_space.dtype)
+        self.masks = np.zeros((self.buffer_size, self.n_envs, action_space.n), dtype=np.int32)
         self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=action_space.dtype)
         self.rewards = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.dones = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
@@ -33,6 +34,7 @@ class ReplayBuffer():
         obs: np.ndarray,
         next_obs: np.ndarray,
         action: np.ndarray,
+        mask:np.ndarray,
         reward: np.ndarray,
         done: np.ndarray,
         infos: List[Dict[str, Any]],
@@ -41,6 +43,7 @@ class ReplayBuffer():
         self.observations[self.pos] = np.array(obs).copy()
         self.next_observations[self.pos] = np.array(next_obs).copy()
         self.actions[self.pos] = np.array(action).copy()
+        self.masks[self.pos] = np.array(mask).copy()
         self.rewards[self.pos] = np.array(reward).copy()
         self.dones[self.pos] = np.array(done).copy()
 
@@ -58,6 +61,7 @@ class ReplayBuffer():
         data = (
             self._normalize_obs(self.observations[batch_inds, 0, :], env),
             self.actions[batch_inds, 0, :],
+            self.masks[batch_inds, 0, :],
             self._normalize_obs(self.next_observations[batch_inds, 0, :], env),
             # Only use dones that are not due to timeouts
             # deactivated by default (timeouts is initialized as an array of False)
