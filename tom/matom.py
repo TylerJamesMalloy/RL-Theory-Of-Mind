@@ -5,7 +5,7 @@ from torch import nn
 from gym import spaces
 from torch.nn import functional as F
 from tom.utils.tom import MindModel
-from tom.utils.utils import get_unobserved_shape, get_concatonated_shape
+from tom.utils.utils import get_unobserved_shape, get_concatonated_shape, get_belief_shape
 
 class MATOM():
     def __init__(self, env, attention_size=20):
@@ -32,6 +32,8 @@ class MATOM():
         episode_step = 0
         learning_timestep = 0
         env.reset()
+
+        prev_acts = -1 * np.ones(len(self.agents))
 
         while(learning_timestep < timesteps):
             learning_timestep += 1
@@ -66,6 +68,8 @@ class MATOM():
                 agent_rewards[agent_index][0] += agent_reward
             
             for trainer in self.agents:
+                prev_beliefs = trainer.prev_beliefs # needs to be called before augment observation 
+                prev_act = trainer.prev_acts[trainer.agent_index]
                 trainer_index = env.agents.index(trainer.agent_key)
                 trainer_obs = trainers_obs[trainer_index]
                 trainer_new_obs = env.observe(agent=trainer.agent_key)['observation']
@@ -73,7 +77,7 @@ class MATOM():
                 rep = trainers_reps[trainer_index]
                 next_rep = trainer.attention_rep(current_agent_index, trainer_new_obs, mask)
 
-                trainer.observe(current_agent_index,trainer_obs,trainer_new_obs,rep,next_rep,action,mask,rew,done,player_info)
+                trainer.observe(current_agent_index,trainer_obs,trainer_new_obs,rep,next_rep,action,prev_act,prev_beliefs,mask,rew,done,player_info)
                 trainer._on_step()
 
                 #trainer.train(batch_size=trainer.batch_size, gradient_steps=trainer.gradient_steps)
@@ -84,6 +88,10 @@ class MATOM():
 
                 episode_rewards = [0.0]  # sum of rewards for all agents
                 agent_rewards = [[0.0] for _ in range(len(self.agents))]  # individual agent reward
+
+                # reset previous acts and beliefs to -1s 
+                for trainer in self.agents:
+                    trainer.reset()
 
                 env.reset()
                 continue
@@ -116,15 +124,20 @@ class TOM():
         self.eps_decay = 200
         self.steps_done = 0
         self.device = th.device("cuda" if th.cuda.is_available() else "cpu")
+        
+        self.prev_beliefs = np.zeros((len(self.env.agents), get_belief_shape(self.env)[1]))
+        self.prev_acts    = 38 * np.ones((len(self.env.agents), 1)) # 39th action signifies no previous action 
 
-        for tom_agent_key in env.agents:
+        for tom_agent_index, tom_agent_key in enumerate(env.agents):
             model = MindModel(env, 
                         observation_space=get_concatonated_shape(env), #env.observation_spaces[tom_agent_key]['observation'],
                         action_space=env.action_spaces[tom_agent_key],
                         attention_size=attention_size,
                         dqn_layers=dqn_layers,
                         gamma=self.gamma,
-                        device=self.device)
+                        device=self.device,
+                        agent_index=tom_agent_index,
+                        owner_index=self.agent_index)
             self.agent_models.append(model)
         
         self.mindModel = self.agent_models[self.agent_index]
@@ -140,6 +153,11 @@ class TOM():
             unseen_mask = np.ones(len(mask)) # Assume other agents could perform any action
             return self.agent_models[trainer_index].attention_rep(obs, unseen_mask)
 
+    def reset(self):
+        self.prev_beliefs = np.zeros((len(self.env.agents), get_belief_shape(self.env)[1]))
+        self.prev_acts    = 38 * np.ones((len(self.env.agents), 1)) # 39th action signifies no previous action 
+        return 
+        
     def masked_softmax(self, vec, mask, dim=0, epsilon=1e-12):
         exps = th.exp(vec).detach().cpu().numpy() 
         masked_exps = exps * mask
@@ -147,14 +165,18 @@ class TOM():
         return (masked_exps/masked_sums)
     
     def augment_observation(self, obs):
-        for agent in self.agent_models:
-            belief = agent.predict_beliefs()
+        prev_beliefs = []
+        for agent_index, agent in enumerate(self.agent_models):
+            belief = agent.predict_beliefs(self.prev_beliefs[agent_index], self.prev_acts[agent_index])
             belief = np.reshape(belief, get_unobserved_shape(self.env)) 
+            prev_beliefs.append(belief.flatten())
             obs = np.append(obs, belief, axis=0)
+        self.prev_beliefs = prev_beliefs
         return obs
 
-    def observe(self,trainer_index,obs,next_obs,rep,next_rep,action,mask,reward,done,infos):
-        self.agent_models[trainer_index].observe(obs,next_obs,rep,next_rep,action,mask,reward,done,infos)
+    def observe(self,trainer_index,obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos):
+        self.prev_acts[trainer_index] = action
+        self.agent_models[trainer_index].observe(obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos)
 
     def predict(self, obs, mask):
         sample = random.random()
@@ -228,7 +250,7 @@ class TOM():
             q_estimates = [np.mean(i) for i in q_estimates]
             action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
             action = np.random.choice(len(original_mask), 1, p=action_sampling)[0]
-
+            
             return (action, None)
    
     def _on_step(self):
