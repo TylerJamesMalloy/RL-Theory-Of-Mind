@@ -16,9 +16,13 @@ model = MATOM(env)
 
 start_time = time.time()
 
-model.learn(50000)
-model.save("./model/t50000_Inference")
+model.learn(100000)
+model.save("./model/t100000")
 
 print("--- %s seconds ---" % (time.time() - start_time))
 
 print("done")
+
+# train 1K
+
+# test on random agent 

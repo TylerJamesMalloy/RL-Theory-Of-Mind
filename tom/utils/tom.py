@@ -212,7 +212,7 @@ class MindModel():
         prev_acts = F.one_hot(prev_acts.squeeze(), num_classes=39) # ohe previous action 
         belief_input = th.cat((prev_beliefs, prev_acts), dim=1)
         belief = self.belief.predict(belief_input)
-        belief = th.reshape(belief, (16, 34, 4)) # my beliefs 
+        belief = th.reshape(belief, (self.batch_size, 34, 4)) # my beliefs 
         obs[:, 6 + self.agent_index, :, :] = belief # set belief to my belief, this didn't add the belief prediction to the graph 
 
         belief = belief.unsqueeze(dim=1)

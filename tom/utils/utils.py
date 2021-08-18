@@ -62,7 +62,7 @@ def get_compressed(attentions, obs, attention_size, device="cuda"):
     card_val_numpy = card_val.cpu().detach().numpy()
     card_loc_numpy = card_loc.cpu().detach().numpy()
 
-    card_slice = np.asarray([obs_numpy[a,card_loc_numpy[a], card_val_numpy[a]] for a in range(16)])
+    card_slice = np.asarray([obs_numpy[a,card_loc_numpy[a], card_val_numpy[a]] for a in range(256)])
     card_slice = th.from_numpy(card_slice).to(device=device)
     compressed = th.cat((card_val_ohe, card_loc_ohe, card_slice, top_k_val), dim=2)
     compressed = th.flatten(compressed, start_dim=1, end_dim=2)
