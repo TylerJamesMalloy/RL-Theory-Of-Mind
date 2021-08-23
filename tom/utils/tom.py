@@ -86,7 +86,8 @@ class MindModel():
         device,
         gamma,
         agent_index,
-        owner_index
+        owner_index,
+        model_type="full"
     ):
 
         self.env = env
@@ -97,15 +98,16 @@ class MindModel():
         self.gamma = gamma
         self.agent_index = agent_index
         self.owner_index = owner_index
+        self.model_type = model_type
 
         # move this to util settings object
-        self.batch_size = 256
+        self.batch_size = 10
         self.target_update = 10
 
         input_size = get_input_shape(env=env, attention_size=attention_size)
         belief_shape = (len(self.env.agents), get_belief_shape(env=env)[1])
 
-        buffer_obs_space = spaces.Box(0,1, shape=observation_space, dtype=np.int32)
+        buffer_obs_space = spaces.Box(low=0,high=1, shape=observation_space, dtype=np.int32)
         buffer_rep_space = spaces.Box(0,1, shape=(input_size,), dtype=np.int32)
         self.replay_buffer = ReplayBuffer(  buffer_size=int(1e5), 
                                             observation_space=buffer_obs_space, 
@@ -113,22 +115,30 @@ class MindModel():
                                             representation_space=buffer_rep_space,
                                             belief_shape=belief_shape) # can't commit too much memory? 
 
-        self.obs_shape = math.prod(list(observation_space))
+        self.obs_shape = np.prod(list(observation_space))
         self.policy_net = DQN(input_shape=input_size, output_shape=action_space.n, layers=dqn_layers, device=self.device)
         self.target_net = DQN(input_shape=input_size, output_shape=action_space.n, layers=dqn_layers, device=self.device)
-        self.policy_optimizer = optim.RMSprop(self.policy_net.model.parameters())
+        #self.policy_optimizer = optim.RMSprop(self.policy_net.model.parameters())
 
         attention_input = self.obs_shape + action_space.n
         attention_output = get_attention_shape(env=env)
         self.attention = AttentionModel(input_shape=attention_input, output_shape=attention_output, layers=dqn_layers, attention_size=attention_size, device=self.device)
-        self.attention_optimizer = optim.RMSprop(self.attention.model.parameters())
+        #self.attention_optimizer = optim.RMSprop(self.attention.model.parameters())
 
         self.belief_shape, self.belief_output = get_belief_shape(env=env)
         belief_input = sum(list(self.belief_shape))
         self.belief = BeliefModel(input_shape=belief_input, output_shape=self.belief_output, layers=dqn_layers, device=self.device)
-        self.belief_optimizer = optim.RMSprop(self.belief.model.parameters())
-        
-        self.all_parameters = list(self.policy_net.model.parameters()) + list(self.attention.model.parameters()) + list(self.belief.model.parameters())
+        #self.belief_optimizer = optim.RMSprop(self.belief.model.parameters())
+
+        if(self.model_type == "full"):
+            self.all_parameters = list(self.policy_net.model.parameters()) + list(self.attention.model.parameters()) + list(self.belief.model.parameters())
+        elif(self.model_type == "attention"):
+            self.all_parameters = list(self.policy_net.model.parameters()) + list(self.attention.model.parameters())
+        elif(self.model_type == "belief"):
+            self.all_parameters = list(self.policy_net.model.parameters()) + list(self.belief.model.parameters())
+        else:
+            self.all_parameters = list(self.policy_net.model.parameters())
+
         self.optimizer = optim.RMSprop(self.all_parameters)
 
         self.unobserved_shape = get_unobserved_shape(env=env)
@@ -163,7 +173,8 @@ class MindModel():
     
     def predict_beliefs(self, prev_belief, prev_action):
         prev_belief = th.from_numpy(prev_belief).flatten()
-        prev_action = th.from_numpy(prev_action)
+        prev_action = th.from_numpy(prev_action) 
+
         input = th.cat((prev_belief, prev_action)).to(device=self.device)
         belief = self.belief.predict(input)
         belief = belief.data.cpu().numpy() # should this be tensor or numpy 
@@ -193,7 +204,6 @@ class MindModel():
     def on_step(self):
         if self.replay_buffer.size() < self.batch_size:
             return
-        
         self.training_step += 1
 
         transitions = self.replay_buffer.sample(self.batch_size, self.env)
@@ -208,25 +218,26 @@ class MindModel():
         non_final_next_obs = th.from_numpy(non_final_next_obs).to(device=self.device) 
         rewards = rewards.squeeze() # rewards may be in a 1D vector 
 
-        ##### belief augmentation ######
-        prev_acts = F.one_hot(prev_acts.squeeze(), num_classes=39) # ohe previous action 
-        belief_input = th.cat((prev_beliefs, prev_acts), dim=1)
-        belief = self.belief.predict(belief_input)
-        belief = th.reshape(belief, (self.batch_size, 34, 4)) # my beliefs 
-        obs[:, 6 + self.agent_index, :, :] = belief # set belief to my belief, this didn't add the belief prediction to the graph 
+        if(self.model_type == "full" or self.mind_model == "belief"):
+            ##### belief augmentation ######
+            prev_acts = F.one_hot(prev_acts.squeeze(), num_classes=len(masks[0]) + 1) # ohe previous action 
+            belief_input = th.cat((prev_beliefs, prev_acts), dim=1)
+            belief = self.belief.predict(belief_input)
+            #belief = th.reshape(belief, (self.batch_size,)) # my beliefs 
+            my_belief_index = self.agent_index * belief.shape[1]
+            #obs[:, my_belief_index:my_belief_index + belief.shape[1]] = belief # set belief to my belief
+            obs = th.cat((obs[:, 0:my_belief_index], belief, obs[:, my_belief_index+belief.shape[1]:obs.shape[1]]), dim=1)
 
-        belief = belief.unsqueeze(dim=1)
-        obs = th.cat((obs[:, 0:6 + self.agent_index, :, :], belief, obs[:, 7 + self.agent_index:10, :, :]), dim=1)
-
-        ##### get attention ######
-        attention_input = th.cat((obs.flatten(start_dim=1), masks), 1)
-        attentions = self.attention.model(attention_input.float()) # Get index of top K attentions 
-        compressed = get_compressed(attentions, obs, self.attention_size, self.device)
+        if(self.model_type == "full" or self.mind_model == "attention"):
+            ##### get attention ######
+            attention_input = th.cat((obs.flatten(start_dim=1), masks), 1)
+            attentions = self.attention.model(attention_input.float()) # Get index of top K attentions 
+            obs = get_compressed(self.env, attentions, obs, self.attention_size, self.device)
 
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
-        state_action_values = self.policy_net.model(compressed).gather(dim=1, index=acts)
+        state_action_values = self.policy_net.model(obs.float()).gather(dim=1, index=acts)
         # Compute V(s_{t+1}) for all next states.
         # Expected values of actions for non_final_next_states are computed based
         # on the "older" target_net; selecting their best reward with max(1).values.
@@ -239,7 +250,7 @@ class MindModel():
         next_masks = th.ones_like(masks, device=self.device) # next mask is unknown 
         next_attention_input = th.cat((non_final_next_obs.flatten(start_dim=1), next_masks), 1)
         next_attentions = self.attention.model(next_attention_input.float())
-        next_compressed = get_compressed(next_attentions, non_final_next_obs, self.attention_size, self.device) # This is all torch operations so it remains on the graph 
+        next_compressed = get_compressed(self.env, next_attentions, non_final_next_obs, self.attention_size, self.device) # This is all torch operations so it remains on the graph 
 
         next_state_values[non_final_mask] = self.target_net.predict(next_compressed).max(1).values.detach() 
         # Compute the expected Q values

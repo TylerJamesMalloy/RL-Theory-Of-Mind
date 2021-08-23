@@ -8,16 +8,18 @@ from tom.utils.tom import MindModel
 from tom.utils.utils import get_unobserved_shape, get_concatonated_shape, get_belief_shape
 
 class MATOM():
-    def __init__(self, env, attention_size=20):
+    def __init__(self, env, model_type="full", attention_size=20):
         env.reset()
         self.env = env 
         agents = []
+        self.model_type = model_type # full, attention, belief, dqn
 
         for agent_key in env.agents:
             agents.append(TOM(env=env, agent_key=agent_key, 
                             observation_space=self.env.observation_spaces[agent_key]['observation'],
                             action_space=self.env.action_spaces[agent_key],
-                            attention_size=attention_size))
+                            attention_size=attention_size,
+                            model_type=self.model_type))
             
         self.agents = agents
     
@@ -51,7 +53,6 @@ class MATOM():
                 trainer_obs = env.observe(agent=trainer.agent_key)['observation']
                 trainer_obs = trainer.augment_observation(trainer_obs)
                 trainers_obs.append(trainer_obs)
-
                 trainer_rep = trainer.attention_rep(current_agent_index, trainer_obs, mask)
                 trainers_reps.append(trainer_rep)
 
@@ -111,9 +112,11 @@ class TOM():
                     agent_key,
                     attention_size,
                     dqn_layers = [64,64],
-                    gamma = 0.999):
+                    gamma = 0.999,
+                    model_type="full"):
         self.env = env
         
+        self.model_type = model_type
         self.agent_key = agent_key
         self.agent_index = env.agents.index(agent_key)
         self.agent_models = []
@@ -124,9 +127,10 @@ class TOM():
         self.eps_decay = 200
         self.steps_done = 0
         self.device = th.device("cuda" if th.cuda.is_available() else "cpu")
+        self.num_actions = len(env.observe(agent=agent_key)['action_mask']) + 1 # last additional action signifies no previous action
         
         self.prev_beliefs = np.zeros((len(self.env.agents), get_belief_shape(self.env)[1]))
-        self.prev_acts    = 38 * np.ones((len(self.env.agents), 1)) # 39th action signifies no previous action 
+        self.prev_acts    = self.num_actions  * np.zeros((len(self.env.agents), 1))  
 
         for tom_agent_index, tom_agent_key in enumerate(env.agents):
             model = MindModel(env, 
@@ -137,7 +141,8 @@ class TOM():
                         gamma=self.gamma,
                         device=self.device,
                         agent_index=tom_agent_index,
-                        owner_index=self.agent_index)
+                        owner_index=self.agent_index,
+                        model_type=self.model_type)
             self.agent_models.append(model)
         
         self.mindModel = self.agent_models[self.agent_index]
@@ -155,7 +160,7 @@ class TOM():
 
     def reset(self):
         self.prev_beliefs = np.zeros((len(self.env.agents), get_belief_shape(self.env)[1]))
-        self.prev_acts    = 38 * np.ones((len(self.env.agents), 1)) # 39th action signifies no previous action 
+        self.prev_acts    = self.num_actions * np.zeros((len(self.env.agents), 1))
         return 
         
     def masked_softmax(self, vec, mask, dim=0, epsilon=1e-12):
@@ -167,7 +172,9 @@ class TOM():
     def augment_observation(self, obs):
         prev_beliefs = []
         for agent_index, agent in enumerate(self.agent_models):
-            belief = agent.predict_beliefs(self.prev_beliefs[agent_index], self.prev_acts[agent_index])
+            prev_act = np.zeros(self.num_actions)  
+            prev_act[int(self.prev_acts[agent_index][0])] = 1
+            belief = agent.predict_beliefs(self.prev_beliefs[agent_index], prev_act)
             belief = np.reshape(belief, get_unobserved_shape(self.env)) 
             prev_beliefs.append(belief.flatten())
             obs = np.append(obs, belief, axis=0)
@@ -175,7 +182,7 @@ class TOM():
         return obs
 
     def observe(self,trainer_index,obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos):
-        self.prev_acts[trainer_index] = action
+        self.prev_acts[trainer_index]  = action
         self.agent_models[trainer_index].observe(obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos)
 
     def predict(self, obs, mask):
