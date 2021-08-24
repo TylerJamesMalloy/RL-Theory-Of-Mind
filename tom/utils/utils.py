@@ -124,13 +124,13 @@ def get_compressed(env, attentions, obs, attention_size, device="cuda"):
             attention_idxs = top_k_ind[batch]
             attention_vals = top_k_val[batch]
             batch_dice = all_dice[batch]
-            batch_obs = th.from_numpy(np.asarray([]))
+            batch_obs = th.from_numpy(np.asarray([])).to(device=device)
             for attention_idx, attention_val in zip(attention_idxs,attention_vals):
                 start = attention_idx * env.unwrapped.num_sides
                 end = start + env.unwrapped.num_sides
                 die_value = batch_dice[start:end]
                 die_location = th.tensor(int(attention_idx / (env.unwrapped.num_sides * env.unwrapped.num_dice)))
-                die_location_ohe = F.one_hot(die_location, num_classes=env.unwrapped.num_locations)
+                die_location_ohe = F.one_hot(die_location, num_classes=env.unwrapped.num_locations).to(device=device)
                 die_rep = th.cat((die_value, die_location_ohe, attention_val))
 
                 batch_obs = th.cat((batch_obs, die_rep))
