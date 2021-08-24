@@ -5,7 +5,7 @@ import numpy as np
 import torch as th 
 import argparse
 import time 
-import os 
+import os
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
@@ -28,7 +28,16 @@ start_time = time.time()
 model.learn(args.timesteps)
 model.save(args.folder)
 
-# python simple.py --model_type dqn --folder ./model/liarsDice/dqn/t10000 --timesteps 10000
+# Remote 
+# python simple.py --model_type dqn --folder ./model/liarsDice/dqn/t100000 --timesteps 100000
+# python simple.py --model_type belief --folder ./model/liarsDice/dqn/t100000 --timesteps 100000
+# python simple.py --model_type attention --folder ./model/liarsDice/attention/t100000 --timesteps 100000
+# python simple.py --model_type full --folder ./model/liarsDice/dqn/t100000 --timesteps 100000
+
+# Laptop
+# python simple.py --model_type belief --folder ./model/liarsDice/dqn/t10000 --timesteps 10000
+# python simple.py --model_type attention --folder ./model/liarsDice/attention/t10000 --timesteps 10000
+# python simple.py --model_type full --folder ./model/liarsDice/dqn/t10000 --timesteps 10000
 
 print("--- %s seconds ---" % (time.time() - start_time))
 

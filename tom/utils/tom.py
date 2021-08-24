@@ -234,7 +234,7 @@ class MindModel():
             attention_input = th.cat((obs.flatten(start_dim=1), masks), 1)
             attentions = self.attention.model(attention_input.float()) # Get index of top K attentions 
             obs = get_compressed(self.env, attentions, obs, self.attention_size, self.device)
-
+            
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net

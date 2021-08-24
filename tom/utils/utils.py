@@ -11,7 +11,7 @@ def get_input_shape(env, attention_size, model_type):
     if("mahjong" in str(env)):
         return attention_size * 49 # attend to some number of tiles  
     if("liars_dice" in str(env)):
-        if(model_type == "dqn" or model_type == "attnetion"):
+        if(model_type == "dqn" or model_type == "belief"):
             return 612 # hard coded for 4 players, 6 dice, 6 sides for now 
         else:
             return (attention_size * (env.unwrapped.num_sides + env.unwrapped.num_locations + 1)) + env.unwrapped.act_shape - 1  

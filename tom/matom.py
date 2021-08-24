@@ -3,6 +3,7 @@ import numpy as np
 import torch as th
 from torch import nn
 from gym import spaces
+from tqdm import tqdm
 from torch.nn import functional as F
 from tom.utils.tom import MindModel
 from tom.utils.utils import get_unobserved_shape, get_concatonated_shape, get_belief_shape
@@ -32,14 +33,11 @@ class MATOM():
         final_ep_ag_rewards = []  # agent rewards for training curve
         agent_info = [[[]]]  # placeholder for benchmarking info
         episode_step = 0
-        learning_timestep = 0
         env.reset()
 
         prev_acts = -1 * np.ones(len(self.agents))
 
-        while(learning_timestep < timesteps):
-            learning_timestep += 1
-
+        for learning_timestep in tqdm(range(timesteps)):
             current_agent_index = env.agents.index(env.agent_selection)
             agent = self.agents[current_agent_index]
             player_key = env.agent_selection 
@@ -58,8 +56,6 @@ class MATOM():
 
             action, _ = agent.predict(obs=obs, mask=mask)
             env.step(action)
-
-            print("step: ", learning_timestep)
 
             new_obs = env.observe(agent=player_key)['observation']
             rew_n, done_n, info_n = env.rewards, env.dones, env.infos
@@ -82,8 +78,6 @@ class MATOM():
 
                 trainer.observe(current_agent_index,trainer_obs,trainer_new_obs,rep,next_rep,action,prev_act,prev_beliefs,mask,rew,done,player_info)
                 trainer._on_step()
-
-                #trainer.train(batch_size=trainer.batch_size, gradient_steps=trainer.gradient_steps)
             
             if(all(done_n.values())): # game is over
                 final_ep_rewards.append(episode_rewards) 
@@ -156,7 +150,6 @@ class TOM():
     def attention_rep(self, trainer_index, obs, mask):
         if(self.model_type == "dqn" or self.model_type == "belief"): 
             return np.zeros(612) # no attention representation used 
-
         if(trainer_index == self.agent_index):
             return self.agent_models[trainer_index].attention_rep(obs, mask)
         else:
@@ -188,7 +181,6 @@ class TOM():
 
     def observe(self,trainer_index,obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos):
         self.prev_acts[trainer_index]  = action
-
         self.agent_models[trainer_index].observe(obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos)
 
     def predict(self, obs, mask):
