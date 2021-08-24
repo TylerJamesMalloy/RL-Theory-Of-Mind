@@ -24,13 +24,12 @@ model = MATOM(env, model_type="full")
 
 start_time = time.time()
 
-model.learn(5000)
-model.save("./model/t5000")
+model.learn(100000)
+model.save("./model/liarsDice/full/t100000")
 
 print("--- %s seconds ---" % (time.time() - start_time))
 
 print("done")
 
 # train 1K
-
 # test on random agent 
