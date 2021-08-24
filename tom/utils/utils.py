@@ -7,11 +7,14 @@ from gym import spaces
 
 # Todo: change this to a helper class with get functions 
 
-def get_input_shape(env, attention_size):
+def get_input_shape(env, attention_size, model_type):
     if("mahjong" in str(env)):
         return attention_size * 49 # attend to some number of tiles  
     if("liars_dice" in str(env)):
-        return (attention_size * (env.unwrapped.num_sides + env.unwrapped.num_locations + 1)) + env.unwrapped.act_shape - 1  
+        if(model_type == "dqn" or model_type == "attnetion"):
+            return 612 # hard coded for 4 players, 6 dice, 6 sides for now 
+        else:
+            return (attention_size * (env.unwrapped.num_sides + env.unwrapped.num_locations + 1)) + env.unwrapped.act_shape - 1  
     
 def get_attention_shape(env):
     if("mahjong" in str(env)):
@@ -62,6 +65,7 @@ def get_compressed_obs(env, obs, attention_idxs, attention_vals):
 
         compressed_obs = np.asarray(compressed_obs).flatten()
         return compressed_obs
+    
     if("liars_dice" in str(env)):
         my_hand_idx = env.unwrapped.num_sides * env.unwrapped.num_dice
         my_hand = obs[0:my_hand_idx]

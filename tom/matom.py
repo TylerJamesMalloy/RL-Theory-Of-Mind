@@ -59,6 +59,8 @@ class MATOM():
             action, _ = agent.predict(obs=obs, mask=mask)
             env.step(action)
 
+            print("step: ", learning_timestep)
+
             new_obs = env.observe(agent=player_key)['observation']
             rew_n, done_n, info_n = env.rewards, env.dones, env.infos
             player_info = [info_n.get(player_key)]
@@ -75,7 +77,7 @@ class MATOM():
                 trainer_obs = trainers_obs[trainer_index]
                 trainer_new_obs = env.observe(agent=trainer.agent_key)['observation']
                 trainer_new_obs = trainer.augment_observation(trainer_new_obs)
-                rep = trainers_reps[trainer_index]
+                rep = trainers_reps[trainer_index] 
                 next_rep = trainer.attention_rep(current_agent_index, trainer_new_obs, mask)
 
                 trainer.observe(current_agent_index,trainer_obs,trainer_new_obs,rep,next_rep,action,prev_act,prev_beliefs,mask,rew,done,player_info)
@@ -152,6 +154,9 @@ class TOM():
             model.save(folder + "/minds/player_" + str(model_index))
 
     def attention_rep(self, trainer_index, obs, mask):
+        if(self.model_type == "dqn" or self.model_type == "belief"): 
+            return np.zeros(612) # no attention representation used 
+
         if(trainer_index == self.agent_index):
             return self.agent_models[trainer_index].attention_rep(obs, mask)
         else:
@@ -183,6 +188,7 @@ class TOM():
 
     def observe(self,trainer_index,obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos):
         self.prev_acts[trainer_index]  = action
+
         self.agent_models[trainer_index].observe(obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos)
 
     def predict(self, obs, mask):
@@ -195,18 +201,18 @@ class TOM():
             return (random.choice([a for action_index, a in enumerate(actions) if mask[action_index] == 1]), None)
         else:
             rollout_steps = 0
-            rollouts = 10
+            rollouts = 4
             obs = obs.astype('float64')
             base_copy = copy.deepcopy(self.env)
             current_copy = copy.deepcopy(self.env)
-            depth_limit = 8
+            depth_limit = 4
             current_depth = 0
             q_estimates = [[]] * len(mask)
             estimated_action = None 
             original_mask = mask
             original_agent_index = self.env.agents.index(self.env.agent_selection)
 
-            if(self.mindModel.replay_buffer.size() < 100):
+            if(self.mindModel.replay_buffer.size() < 1000):
                 # Random masked action
                 q_estimates = np.ones(len(original_mask))
                 action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))

@@ -104,7 +104,7 @@ class MindModel():
         self.batch_size = 10
         self.target_update = 10
 
-        input_size = get_input_shape(env=env, attention_size=attention_size)
+        input_size = get_input_shape(env=env, attention_size=attention_size, model_type=self.model_type)
         belief_shape = (len(self.env.agents), get_belief_shape(env=env)[1])
 
         buffer_obs_space = spaces.Box(low=0,high=1, shape=observation_space, dtype=np.int32)
@@ -154,8 +154,9 @@ class MindModel():
         return get_compressed_obs(env=self.env, obs=obs, attention_idxs=top_n_idx, attention_vals=top_n_val)
 
     def q_values(self, obs, mask):
-        compressed_obs = self.attention_rep(obs, mask)
-        return self.policy_net.predict(th.from_numpy(compressed_obs).to(self.device))
+        if(self.model_type == "full" or self.model_type == "attention"):
+            obs = self.attention_rep(obs, mask)
+        return self.policy_net.predict(th.from_numpy(obs).to(self.device))
 
     def predict(self, obs, mask):
         # copy of functionality in matom model 
@@ -218,7 +219,7 @@ class MindModel():
         non_final_next_obs = th.from_numpy(non_final_next_obs).to(device=self.device) 
         rewards = rewards.squeeze() # rewards may be in a 1D vector 
 
-        if(self.model_type == "full" or self.mind_model == "belief"):
+        if(self.model_type == "full" or self.model_type == "belief"):
             ##### belief augmentation ######
             prev_acts = F.one_hot(prev_acts.squeeze(), num_classes=len(masks[0]) + 1) # ohe previous action 
             belief_input = th.cat((prev_beliefs, prev_acts), dim=1)
@@ -228,7 +229,7 @@ class MindModel():
             #obs[:, my_belief_index:my_belief_index + belief.shape[1]] = belief # set belief to my belief
             obs = th.cat((obs[:, 0:my_belief_index], belief, obs[:, my_belief_index+belief.shape[1]:obs.shape[1]]), dim=1)
 
-        if(self.model_type == "full" or self.mind_model == "attention"):
+        if(self.model_type == "full" or self.model_type == "attention"):
             ##### get attention ######
             attention_input = th.cat((obs.flatten(start_dim=1), masks), 1)
             attentions = self.attention.model(attention_input.float()) # Get index of top K attentions 
@@ -250,9 +251,11 @@ class MindModel():
         next_masks = th.ones_like(masks, device=self.device) # next mask is unknown 
         next_attention_input = th.cat((non_final_next_obs.flatten(start_dim=1), next_masks), 1)
         next_attentions = self.attention.model(next_attention_input.float())
-        next_compressed = get_compressed(self.env, next_attentions, non_final_next_obs, self.attention_size, self.device) # This is all torch operations so it remains on the graph 
 
-        next_state_values[non_final_mask] = self.target_net.predict(next_compressed).max(1).values.detach() 
+        if(self.model_type == "full" or self.model_type == "attention"):
+            next_obs = get_compressed(self.env, next_attentions, non_final_next_obs, self.attention_size, self.device) # This is all torch operations so it remains on the graph 
+
+        next_state_values[non_final_mask] = self.target_net.predict(next_obs).max(1).values.detach() 
         # Compute the expected Q values
         # If we are modelling ourselves, we update according to observed reward 
         if(self.owner_index == self.agent_index):
