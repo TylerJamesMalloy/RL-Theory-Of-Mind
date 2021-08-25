@@ -1,5 +1,6 @@
 import copy, math, random, gym
 import numpy as np
+from numpy.lib.npyio import load
 import torch as th
 from torch import nn
 from gym import spaces
@@ -9,22 +10,34 @@ from tom.utils.tom import MindModel
 from tom.utils.utils import get_unobserved_shape, get_concatonated_shape, get_belief_shape
 
 class MATOM():
-    def __init__(self, env, model_type="full", attention_size=20):
+    def __init__(self, env, model_type="full", attention_size=20, load_models=False, load_paths=None, load_types=None):
         env.reset()
         self.env = env 
         agents = []
         self.model_type = model_type # full, attention, belief, dqn
 
-        for agent_key in env.agents:
-            agents.append(TOM(env=env, agent_key=agent_key, 
-                            observation_space=self.env.observation_spaces[agent_key]['observation'],
-                            action_space=self.env.action_spaces[agent_key],
-                            attention_size=attention_size,
-                            model_type=self.model_type))
+        if(load_models):
+            for agent_index, agent_key in enumerate(env.agents):
+                agents.append(TOM(env=env, agent_key=agent_key, 
+                                observation_space=self.env.observation_spaces[agent_key]['observation'],
+                                action_space=self.env.action_spaces[agent_key],
+                                attention_size=attention_size,
+                                model_type=load_types[agent_index],
+                                load_path=load_paths[agent_index]))
+        else:
+            for agent_key in env.agents:
+                agents.append(TOM(env=env, agent_key=agent_key, 
+                                observation_space=self.env.observation_spaces[agent_key]['observation'],
+                                action_space=self.env.action_spaces[agent_key],
+                                attention_size=attention_size,
+                                model_type=self.model_type))
             
         self.agents = agents
+        self.load = load_models
+        self.paths = load_paths 
+        self.attention_size = attention_size
     
-    def learn(self, timesteps):
+    def learn(self, timesteps, train=True):
         env = self.env 
 
         episode_rewards = [0.0]  # sum of rewards for all agents
@@ -65,6 +78,7 @@ class MATOM():
             rew = rew_array[current_agent_index]
             for agent_index, agent_reward in enumerate(rew_array):
                 agent_rewards[agent_index][0] += agent_reward
+
             
             for trainer in self.agents:
                 prev_beliefs = trainer.prev_beliefs # needs to be called before augment observation 
@@ -76,8 +90,9 @@ class MATOM():
                 rep = trainers_reps[trainer_index] 
                 next_rep = trainer.attention_rep(current_agent_index, trainer_new_obs, mask)
 
-                trainer.observe(current_agent_index,trainer_obs,trainer_new_obs,rep,next_rep,action,prev_act,prev_beliefs,mask,rew,done,player_info)
-                trainer._on_step()
+                if(train):
+                    trainer.observe(current_agent_index,trainer_obs,trainer_new_obs,rep,next_rep,action,prev_act,prev_beliefs,mask,rew,done,player_info)
+                    trainer._on_step()
             
             if(all(done_n.values())): # game is over
                 final_ep_rewards.append(episode_rewards) 
@@ -93,7 +108,7 @@ class MATOM():
                 env.reset()
                 continue
 
-        return 
+        return final_ep_ag_rewards
 
     def save(self, folder):
         for trainer in self.agents:
@@ -109,7 +124,8 @@ class TOM():
                     attention_size,
                     dqn_layers = [64,64],
                     gamma = 0.999,
-                    model_type="full"):
+                    model_type="full",
+                    load_path=None):
         self.env = env
         
         self.model_type = model_type
@@ -120,26 +136,48 @@ class TOM():
         self.gamma = gamma
         self.eps_start = 0.9
         self.eps_end = 0.05
-        self.eps_decay = 200
+        self.eps_decay = 1000
         self.steps_done = 0
         self.device = th.device("cuda" if th.cuda.is_available() else "cpu")
         self.num_actions = len(env.observe(agent=agent_key)['action_mask']) + 1 # last additional action signifies no previous action
+        self.load_path = load_path
         
         self.prev_beliefs = np.zeros((len(self.env.agents), get_belief_shape(self.env)[1]))
         self.prev_acts    = self.num_actions  * np.zeros((len(self.env.agents), 1))  
 
-        for tom_agent_index, tom_agent_key in enumerate(env.agents):
-            model = MindModel(env, 
-                        observation_space=get_concatonated_shape(env), #env.observation_spaces[tom_agent_key]['observation'],
-                        action_space=env.action_spaces[tom_agent_key],
-                        attention_size=attention_size,
-                        dqn_layers=dqn_layers,
-                        gamma=self.gamma,
-                        device=self.device,
-                        agent_index=tom_agent_index,
-                        owner_index=self.agent_index,
-                        model_type=self.model_type)
-            self.agent_models.append(model)
+        if(load_path is not None):
+            mind_load_paths = [ load_path + '/minds/player_0/',
+                                load_path + '/minds/player_1/',
+                                load_path + '/minds/player_2/',
+                                load_path + '/minds/player_3/']
+
+            for tom_agent_index, tom_agent_key in enumerate(env.agents):
+                model = MindModel(env, 
+                            observation_space=get_concatonated_shape(env), #env.observation_spaces[tom_agent_key]['observation'],
+                            action_space=env.action_spaces[tom_agent_key],
+                            attention_size=attention_size,
+                            dqn_layers=dqn_layers,
+                            gamma=self.gamma,
+                            device=self.device,
+                            agent_index=tom_agent_index,
+                            owner_index=self.agent_index,
+                            model_type=self.model_type,
+                            load_path=mind_load_paths[tom_agent_index])
+                self.agent_models.append(model)
+        
+        else:
+            for tom_agent_index, tom_agent_key in enumerate(env.agents):
+                model = MindModel(env, 
+                            observation_space=get_concatonated_shape(env), #env.observation_spaces[tom_agent_key]['observation'],
+                            action_space=env.action_spaces[tom_agent_key],
+                            attention_size=attention_size,
+                            dqn_layers=dqn_layers,
+                            gamma=self.gamma,
+                            device=self.device,
+                            agent_index=tom_agent_index,
+                            owner_index=self.agent_index,
+                            model_type=self.model_type)
+                self.agent_models.append(model)
         
         self.mindModel = self.agent_models[self.agent_index]
     
@@ -191,20 +229,20 @@ class TOM():
         if sample < eps_threshold:
             actions = np.linspace(0,len(mask)-1,num=len(mask), dtype=np.int32)
             return (random.choice([a for action_index, a in enumerate(actions) if mask[action_index] == 1]), None)
-        else:
+        else: 
             rollout_steps = 0
-            rollouts = 4
+            rollouts = 100
             obs = obs.astype('float64')
             base_copy = copy.deepcopy(self.env)
             current_copy = copy.deepcopy(self.env)
-            depth_limit = 4
+            depth_limit = 4 
             current_depth = 0
             q_estimates = [[]] * len(mask)
             estimated_action = None 
             original_mask = mask
             original_agent_index = self.env.agents.index(self.env.agent_selection)
 
-            if(self.mindModel.replay_buffer.size() < 1000):
+            if(self.mindModel.replay_buffer.size() < 1000 and self.load_path is None):
                 # Random masked action
                 q_estimates = np.ones(len(original_mask))
                 action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))

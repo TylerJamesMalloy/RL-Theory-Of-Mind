@@ -15,33 +15,47 @@ parser.add_argument('--model_type', default='full', type=str, help='full, attent
 parser.add_argument('--folder', default='./', type=str, help='Location to save all agent models')
 parser.add_argument('--environment', default='liars_dice', type=str, help='Environment to train agents in')
 parser.add_argument('--timesteps', default=100000, type=int, help='Timesteps for training')
+parser.add_argument('--compare', default=False, type=bool, help='Timesteps for training')
+parser.add_argument('--first_folder', default='./', type=str, help='first load model location')
+parser.add_argument('--second_folder', default='./', type=str, help='second load model location')
 
 args = parser.parse_args()
 
 env = liars_dice_v0.env(num_players=4)
 env.reset()
 
-model = MATOM(env, model_type=args.model_type)
+# python simple.py --compare True --first_folder ./model/liarsDice/full/t10000 --second_folder ./model/liarsDice/dqn/t10000
 
-start_time = time.time()
-
-model.learn(args.timesteps)
-model.save(args.folder)
-
-# Remote 
-# python simple.py --model_type dqn --folder ./model/liarsDice/dqn/t100000 --timesteps 100000
-# python simple.py --model_type belief --folder ./model/liarsDice/dqn/t100000 --timesteps 100000
-# python simple.py --model_type attention --folder ./model/liarsDice/attention/t100000 --timesteps 100000
-# python simple.py --model_type full --folder ./model/liarsDice/dqn/t100000 --timesteps 100000
-
-# Laptop
-# python simple.py --model_type belief --folder ./model/liarsDice/dqn/t10000 --timesteps 10000
+# python simple.py --model_type full --folder ./model/liarsDice/full/t10000 --timesteps 10000
 # python simple.py --model_type attention --folder ./model/liarsDice/attention/t10000 --timesteps 10000
-# python simple.py --model_type full --folder ./model/liarsDice/dqn/t10000 --timesteps 10000
+# python simple.py --model_type belief --folder ./model/liarsDice/belief/t10000 --timesteps 10000
+# python simple.py --model_type dqn --folder ./model/liarsDice/dqn/t10000 --timesteps 10000
 
-print("--- %s seconds ---" % (time.time() - start_time))
+if(args.compare):
+    agent1 = args.first_folder + "/player_player_0/"
+    agent2 = args.second_folder + "/player_player_1/"
+    agent3 = args.second_folder + "/player_player_2/"
+    agent4 = args.second_folder + "/player_player_3/"
+    load_paths = [agent1, agent2, agent3, agent4]
 
-print("done")
+    model = MATOM(env, model_type=None, load_models=True, load_paths=load_paths, load_types=["full", "dqn", "dqn", "dqn"])
+
+    results = model.learn(1000, train=False)
+    results = np.asarray(results)
+    print(results.shape)
+    print(np.sum(results, axis=0))
+
+    assert(False )
+    
+else:
+    model = MATOM(env, model_type=args.model_type)
+    start_time = time.time()
+
+    model.learn(args.timesteps)
+    model.save(args.folder)
+
+    print("--- %s seconds ---" % (time.time() - start_time))
+    print("done")
 
 # train 1K
 # test on random agent 

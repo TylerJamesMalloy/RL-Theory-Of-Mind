@@ -46,6 +46,9 @@ class DQN():
 
     def predict(self, obs):
         return self.model(obs.float())
+    
+    def load(self, path):
+        self.model.load_state_dict(th.load(path))
 
 class AttentionModel():
     def __init__(
@@ -61,6 +64,9 @@ class AttentionModel():
 
     def predict(self, obs):
         return self.model(obs.float()) 
+    
+    def load(self, path):
+        self.model.load_state_dict(th.load(path))
 
 class BeliefModel():
     def __init__(
@@ -74,6 +80,9 @@ class BeliefModel():
 
     def predict(self, obs):
         return self.model(obs.float()) 
+    
+    def load(self, path):
+        self.model.load_state_dict(th.load(path))
 
 class MindModel():
     def __init__(
@@ -87,7 +96,8 @@ class MindModel():
         gamma,
         agent_index,
         owner_index,
-        model_type="full"
+        model_type="full",
+        load_path=None,
     ):
 
         self.env = env
@@ -101,7 +111,7 @@ class MindModel():
         self.model_type = model_type
 
         # move this to util settings object
-        self.batch_size = 10
+        self.batch_size = 256
         self.target_update = 10
 
         input_size = get_input_shape(env=env, attention_size=attention_size, model_type=self.model_type)
@@ -129,6 +139,17 @@ class MindModel():
         belief_input = sum(list(self.belief_shape))
         self.belief = BeliefModel(input_shape=belief_input, output_shape=self.belief_output, layers=dqn_layers, device=self.device)
         #self.belief_optimizer = optim.RMSprop(self.belief.model.parameters())
+
+        if(load_path is not None):
+            self.belief.load(load_path + "belief") 
+            self.attention.load(load_path + "attention") 
+            self.target_net.load(load_path + "target") 
+            self.policy_net.load(load_path + "policy") 
+
+            self.belief.model.eval()
+            self.attention.model.eval()
+            self.target_net.model.eval()
+            self.policy_net.model.eval()
 
         if(self.model_type == "full"):
             self.all_parameters = list(self.policy_net.model.parameters()) + list(self.attention.model.parameters()) + list(self.belief.model.parameters())
@@ -234,7 +255,7 @@ class MindModel():
             attention_input = th.cat((obs.flatten(start_dim=1), masks), 1)
             attentions = self.attention.model(attention_input.float()) # Get index of top K attentions 
             obs = get_compressed(self.env, attentions, obs, self.attention_size, self.device)
-            
+
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
