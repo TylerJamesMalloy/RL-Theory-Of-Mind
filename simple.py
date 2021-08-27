@@ -24,12 +24,18 @@ args = parser.parse_args()
 env = liars_dice_v0.env(num_players=4)
 env.reset()
 
-# python simple.py --compare True --first_folder ./model/liarsDice/full/t10000 --second_folder ./model/liarsDice/dqn/t10000
+# python simple.py --compare True --first_folder ./model/liarsDice/belief/t5000 --second_folder ./model/liarsDice/dqn/t5000 --timesteps 10000
 
-# python simple.py --model_type full --folder ./model/liarsDice/full/t10000 --timesteps 10000
-# python simple.py --model_type attention --folder ./model/liarsDice/attention/t10000 --timesteps 10000
-# python simple.py --model_type belief --folder ./model/liarsDice/belief/t10000 --timesteps 10000
-# python simple.py --model_type dqn --folder ./model/liarsDice/dqn/t10000 --timesteps 10000
+# python simple.py --model_type full --folder ./model/liarsDice/full/t100000 --timesteps 100000
+# python simple.py --model_type dqn --folder ./model/liarsDice/dqn/t100000 --timesteps 100000
+# python simple.py --model_type attention --folder ./model/liarsDice/attention/t100000 --timesteps 100000
+# python simple.py --model_type belief --folder ./model/liarsDice/belief/t100000 --timesteps 100000
+
+
+# python simple.py --model_type full --folder ./model/liarsDice/full/t5000 --timesteps 5000
+# python simple.py --model_type attention --folder ./model/liarsDice/attention/t5000 --timesteps 5000
+# python simple.py --model_type belief --folder ./model/liarsDice/belief/t5000 --timesteps 5000
+# python simple.py --model_type dqn --folder ./model/liarsDice/dqn/t5000 --timesteps 5000
 
 if(args.compare):
     agent1 = args.first_folder + "/player_player_0/"
@@ -38,9 +44,9 @@ if(args.compare):
     agent4 = args.second_folder + "/player_player_3/"
     load_paths = [agent1, agent2, agent3, agent4]
 
-    model = MATOM(env, model_type=None, load_models=True, load_paths=load_paths, load_types=["full", "dqn", "dqn", "dqn"])
+    model = MATOM(env, model_type=None, load_models=True, load_paths=load_paths, load_types=["belief", "dqn", "dqn", "dqn"])
 
-    results = model.learn(1000, train=False)
+    results = model.learn(args.timesteps, train=False)
     results = np.asarray(results)
     print(results.shape)
     print(np.sum(results, axis=0))

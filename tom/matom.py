@@ -201,7 +201,7 @@ class TOM():
         
     def masked_softmax(self, vec, mask, dim=0, epsilon=1e-12):
         exps = th.exp(vec).detach().cpu().numpy() 
-        masked_exps = exps * mask
+        masked_exps = (exps * mask) / 100
         masked_sums = masked_exps.sum(dim) + epsilon
         return (masked_exps/masked_sums)
     
@@ -235,17 +235,17 @@ class TOM():
             obs = obs.astype('float64')
             base_copy = copy.deepcopy(self.env)
             current_copy = copy.deepcopy(self.env)
-            depth_limit = 4 
+            depth_limit = len(self.agent_models) + 1
             current_depth = 0
-            q_estimates = [[]] * len(mask)
+            q_estimates = [[] for _ in range(len(mask))]
             estimated_action = None 
             original_mask = mask
             original_agent_index = self.env.agents.index(self.env.agent_selection)
 
-            if(self.mindModel.replay_buffer.size() < 1000 and self.load_path is None):
+            if(self.mindModel.replay_buffer.size() < 100 and self.load_path is None):
                 # Random masked action
-                q_estimates = np.ones(len(original_mask))
-                action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
+                temp_q_estimates = np.ones(len(original_mask))
+                action_sampling = ((temp_q_estimates * original_mask) / np.sum(temp_q_estimates * original_mask))
                 action = np.random.choice(len(original_mask), 1, p=action_sampling)[0]
                 return (action, None)
 
@@ -282,7 +282,9 @@ class TOM():
                 augmented_new_obs = self.augment_observation(new_obs)
                 q_mask = mask if current_agent_index == original_agent_index else np.ones(len(mask)) #  if mask shoudld be known input it, otherwise all ones 
                 next_obs_q = agent.q_values(augmented_new_obs, q_mask) 
-                q_estimates[estimated_action].append(reward + self.gamma * np.max(next_obs_q.detach().cpu().numpy()))
+
+                q_estimate = reward + self.gamma * np.max(next_obs_q.detach().cpu().numpy())
+                q_estimates[estimated_action].append(q_estimate)
 
                 if(all(done_n.values()) or current_depth >= depth_limit):
                     current_depth = 0
@@ -290,8 +292,11 @@ class TOM():
                     estimated_action = None
                     rollout_steps += 1
             
-            q_estimates = [np.mean(i) for i in q_estimates]
-            action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
+            q_estimates = [np.mean(i) if len(i) > 0 else 0 for i in q_estimates] 
+            #q_estimates = np.nan_to_num(q_estimates) # replace nan with 0, empty array means are NaN
+            q_estimates = th.Tensor(q_estimates)
+            #action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
+            action_sampling = self.masked_softmax(q_estimates, original_mask)
             action = np.random.choice(len(original_mask), 1, p=action_sampling)[0]
             
             return (action, None)

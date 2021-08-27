@@ -111,7 +111,7 @@ class MindModel():
         self.model_type = model_type
 
         # move this to util settings object
-        self.batch_size = 256
+        self.batch_size = 1024
         self.target_update = 10
 
         input_size = get_input_shape(env=env, attention_size=attention_size, model_type=self.model_type)
