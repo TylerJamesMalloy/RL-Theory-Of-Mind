@@ -226,20 +226,11 @@ class TOM():
         eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
             math.exp(-1. * self.steps_done / self.eps_decay)
         self.steps_done += 1
-        if sample < eps_threshold:
+        
+        if sample < eps_threshold or self.model_type == "random":
             actions = np.linspace(0,len(mask)-1,num=len(mask), dtype=np.int32)
             return (random.choice([a for action_index, a in enumerate(actions) if mask[action_index] == 1]), None)
-        if(training):
-            augmented_obs = self.augment_observation(obs)
-            q_values = self.mindModel.q_values(augmented_obs, mask)
-            q_values = th.tensor(q_values, device=self.device)
-            #action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
-            action_sampling = self.masked_softmax(q_values, mask)
-            action = np.random.choice(len(mask), 1, p=action_sampling)[0]
-            
-            return (action, None)
         else: 
-            print("Not in training")
             rollout_steps = 0
             rollouts = 100
             obs = obs.astype('float64')
@@ -302,12 +293,14 @@ class TOM():
                     estimated_action = None
                     rollout_steps += 1
             
+            
             q_estimates = [np.mean(i) if len(i) > 0 else 0 for i in q_estimates] 
             #q_estimates = np.nan_to_num(q_estimates) # replace nan with 0, empty array means are NaN
-            q_estimates = th.tensor(q_estimates, device=self.device)
+            #q_estimates = th.tensor(q_estimates, device=self.device)
             #action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
-            action_sampling = self.masked_softmax(q_estimates, original_mask)
-            action = np.random.choice(len(original_mask), 1, p=action_sampling)[0]
+            #action_sampling = self.masked_softmax(q_estimates, original_mask)
+            #action = np.random.choice(len(original_mask), 1, p=action_sampling)[0]
+            action = np.argmax(q_estimates)
             
             return (action, None)
    

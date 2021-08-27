@@ -24,7 +24,7 @@ args = parser.parse_args()
 env = liars_dice_v0.env(num_players=4)
 env.reset()
 
-# python simple.py --compare True --first_folder ./model/liarsDice/attention/t5000 --second_folder ./model/liarsDice/dqn/t5000 --timesteps 1000
+# python simple.py --compare True --first_folder ./model/liarsDice/full/t1000 --second_folder ./model/liarsDice/full/t1000 --timesteps 1000
 
 
 # python simple.py --model_type full --folder ./model/liarsDice/full/t1000 --timesteps 1000
@@ -39,14 +39,14 @@ if(args.compare):
     agent4 = args.second_folder + "/player_player_3/"
     load_paths = [agent1, agent2, agent3, agent4]
 
-    model = MATOM(env, model_type=None, load_models=True, load_paths=load_paths, load_types=["attention", "dqn", "dqn", "dqn"])
+    model = MATOM(env, model_type=None, load_models=True, load_paths=load_paths, load_types=["full", "random", "random", "random"])
 
     results = model.learn(args.timesteps, train=False)
     results = np.asarray(results)
     print(results.shape)
     print(np.sum(results, axis=0))
 
-    assert(False )
+    assert(False)
     
 else:
     model = MATOM(env, model_type=args.model_type)

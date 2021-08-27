@@ -111,9 +111,8 @@ class MindModel():
         self.model_type = model_type
 
         # move this to util settings object
-        self.batch_size = 128
-        self.target_update = 100
-        self.net_update = 10
+        self.batch_size = 64
+        self.target_update = 10
 
         input_size = get_input_shape(env=env, attention_size=attention_size, model_type=self.model_type)
         belief_shape = (len(self.env.agents), get_belief_shape(env=env)[1])
@@ -129,17 +128,14 @@ class MindModel():
         self.obs_shape = np.prod(list(observation_space))
         self.policy_net = DQN(input_shape=input_size, output_shape=action_space.n, layers=dqn_layers, device=self.device)
         self.target_net = DQN(input_shape=input_size, output_shape=action_space.n, layers=dqn_layers, device=self.device)
-        #self.policy_optimizer = optim.RMSprop(self.policy_net.model.parameters())
 
         attention_input = self.obs_shape + action_space.n
         attention_output = get_attention_shape(env=env)
         self.attention = AttentionModel(input_shape=attention_input, output_shape=attention_output, layers=dqn_layers, attention_size=attention_size, device=self.device)
-        #self.attention_optimizer = optim.RMSprop(self.attention.model.parameters())
 
         self.belief_shape, self.belief_output = get_belief_shape(env=env)
         belief_input = sum(list(self.belief_shape))
         self.belief = BeliefModel(input_shape=belief_input, output_shape=self.belief_output, layers=dqn_layers, device=self.device)
-        #self.belief_optimizer = optim.RMSprop(self.belief.model.parameters())
 
         if(load_path is not None):
             self.belief.load(load_path + "belief") 
@@ -228,9 +224,6 @@ class MindModel():
         if self.replay_buffer.size() < self.batch_size:
             return
         self.training_step += 1
-
-        if not self.training_step % self.net_update == 0:
-            return 
 
         transitions = self.replay_buffer.sample(self.batch_size, self.env)
         # Transpose the batch
