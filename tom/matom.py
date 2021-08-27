@@ -232,7 +232,7 @@ class TOM():
         if(training):
             augmented_obs = self.augment_observation(obs)
             q_values = self.mindModel.q_values(augmented_obs, mask)
-            q_values = th.Tensor(q_values, device=self.device)
+            q_values = th.tensor(q_values, device=self.device)
             #action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
             action_sampling = self.masked_softmax(q_values, mask)
             action = np.random.choice(len(mask), 1, p=action_sampling)[0]
@@ -304,7 +304,7 @@ class TOM():
             
             q_estimates = [np.mean(i) if len(i) > 0 else 0 for i in q_estimates] 
             #q_estimates = np.nan_to_num(q_estimates) # replace nan with 0, empty array means are NaN
-            q_estimates = th.Tensor(q_estimates, device=self.device)
+            q_estimates = th.tensor(q_estimates, device=self.device)
             #action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
             action_sampling = self.masked_softmax(q_estimates, original_mask)
             action = np.random.choice(len(original_mask), 1, p=action_sampling)[0]
