@@ -111,15 +111,16 @@ class MindModel():
         self.model_type = model_type
 
         # move this to util settings object
-        self.batch_size = 1024
-        self.target_update = 10
+        self.batch_size = 128
+        self.target_update = 100
+        self.net_update = 10
 
         input_size = get_input_shape(env=env, attention_size=attention_size, model_type=self.model_type)
         belief_shape = (len(self.env.agents), get_belief_shape(env=env)[1])
 
         buffer_obs_space = spaces.Box(low=0,high=1, shape=observation_space, dtype=np.int32)
         buffer_rep_space = spaces.Box(0,1, shape=(input_size,), dtype=np.int32)
-        self.replay_buffer = ReplayBuffer(  buffer_size=int(1e5), 
+        self.replay_buffer = ReplayBuffer(  buffer_size=int(1e6), 
                                             observation_space=buffer_obs_space, 
                                             action_space=action_space,
                                             representation_space=buffer_rep_space,
@@ -227,6 +228,9 @@ class MindModel():
         if self.replay_buffer.size() < self.batch_size:
             return
         self.training_step += 1
+
+        if not self.training_step % self.net_update == 0:
+            return 
 
         transitions = self.replay_buffer.sample(self.batch_size, self.env)
         # Transpose the batch

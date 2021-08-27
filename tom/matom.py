@@ -67,7 +67,7 @@ class MATOM():
                 trainer_rep = trainer.attention_rep(current_agent_index, trainer_obs, mask)
                 trainers_reps.append(trainer_rep)
 
-            action, _ = agent.predict(obs=obs, mask=mask)
+            action, _ = agent.predict(obs=obs, mask=mask, training=train)
             env.step(action)
 
             new_obs = env.observe(agent=player_key)['observation']
@@ -221,7 +221,7 @@ class TOM():
         self.prev_acts[trainer_index]  = action
         self.agent_models[trainer_index].observe(obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos)
 
-    def predict(self, obs, mask):
+    def predict(self, obs, mask, training=True):
         sample = random.random()
         eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
             math.exp(-1. * self.steps_done / self.eps_decay)
@@ -229,7 +229,17 @@ class TOM():
         if sample < eps_threshold:
             actions = np.linspace(0,len(mask)-1,num=len(mask), dtype=np.int32)
             return (random.choice([a for action_index, a in enumerate(actions) if mask[action_index] == 1]), None)
+        if(training):
+            augmented_obs = self.augment_observation(obs)
+            q_values = self.mindModel.q_values(augmented_obs, mask)
+            q_values = th.Tensor(q_values)
+            #action_sampling = ((q_estimates * original_mask) / np.sum(q_estimates * original_mask))
+            action_sampling = self.masked_softmax(q_values, mask)
+            action = np.random.choice(len(mask), 1, p=action_sampling)[0]
+            
+            return (action, None)
         else: 
+            print("Not in training")
             rollout_steps = 0
             rollouts = 100
             obs = obs.astype('float64')
