@@ -4,6 +4,7 @@ import numpy as np
 import math 
 import gym
 from gym import spaces
+from numpy.core.defchararray import mod
 from numpy.core.numeric import indices
 from numpy.lib.utils import info
 from torch._C import device
@@ -118,12 +119,10 @@ class MindModel():
         belief_shape = (len(self.env.agents), get_belief_shape(env=env)[1])
 
         buffer_obs_space = spaces.Box(low=0,high=1, shape=observation_space, dtype=np.int32)
-        buffer_rep_space = spaces.Box(0,1, shape=(input_size,), dtype=np.int32)
-        self.replay_buffer = ReplayBuffer(  buffer_size=int(1e6), 
+        self.replay_buffer = ReplayBuffer(  buffer_size=int(1e5), 
                                             observation_space=buffer_obs_space, 
                                             action_space=action_space,
-                                            representation_space=buffer_rep_space,
-                                            belief_shape=belief_shape) # can't commit too much memory? 
+                                            belief_shape=belief_shape) # don't commit too much to memory on short training tests
 
         self.obs_shape = np.prod(list(observation_space))
         self.policy_net = DQN(input_shape=input_size, output_shape=action_space.n, layers=dqn_layers, device=self.device)
@@ -187,8 +186,8 @@ class MindModel():
 
         return action
     
-    def observe(self,obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos):
-        self.replay_buffer.add(obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos)
+    def observe(self,obs,next_obs,action,prev_act,prev_belief,mask,reward,done,infos):
+        self.replay_buffer.add(obs,next_obs,action,prev_act,prev_belief,mask,reward,done,infos)
     
     def predict_beliefs(self, prev_belief, prev_action):
         prev_belief = th.from_numpy(prev_belief).flatten()
@@ -228,23 +227,21 @@ class MindModel():
         transitions = self.replay_buffer.sample(self.batch_size, self.env)
         # Transpose the batch
         #batch = Transition(*zip(*transitions))
-        (obs, next_obs, _, _, acts, prev_acts, prev_beliefs, masks, dones, rewards) = transitions
+        (obs, next_obs, acts, prev_acts, prev_beliefs, masks, dones, rewards) = transitions
 
         # Compute a mask of non-final states and concatenate the batch elements
         # (a final state would've been the one after which simulation ended)
         non_final_mask = th.tensor(tuple(map(lambda s: s is not None, next_obs)), device=self.device, dtype=th.bool) 
         non_final_next_obs = np.asarray([s for s in next_obs.cpu().numpy() if s is not None])
         non_final_next_obs = th.from_numpy(non_final_next_obs).to(device=self.device) 
-        rewards = rewards.squeeze() # rewards may be in a 1D vector 
+        rewards = rewards.squeeze() 
 
         if(self.model_type == "full" or self.model_type == "belief"):
             ##### belief augmentation ######
-            prev_acts = F.one_hot(prev_acts.squeeze(), num_classes=len(masks[0]) + 1) # ohe previous action 
+            prev_acts = F.one_hot(prev_acts.squeeze(), num_classes=len(masks[0]) + 1) 
             belief_input = th.cat((prev_beliefs, prev_acts), dim=1)
             belief = self.belief.predict(belief_input)
-            #belief = th.reshape(belief, (self.batch_size,)) # my beliefs 
             my_belief_index = self.agent_index * belief.shape[1]
-            #obs[:, my_belief_index:my_belief_index + belief.shape[1]] = belief # set belief to my belief
             obs = th.cat((obs[:, 0:my_belief_index], belief, obs[:, my_belief_index+belief.shape[1]:obs.shape[1]]), dim=1)
 
         if(self.model_type == "full" or self.model_type == "attention"):

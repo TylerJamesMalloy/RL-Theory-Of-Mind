@@ -70,7 +70,7 @@ class MATOM():
             action, _ = agent.predict(obs=obs, mask=mask, training=train)
             env.step(action)
 
-            new_obs = env.observe(agent=player_key)['observation']
+            #new_obs = env.observe(agent=player_key)['observation']
             rew_n, done_n, info_n = env.rewards, env.dones, env.infos
             player_info = [info_n.get(player_key)]
             done = done_n.get(player_key)
@@ -79,7 +79,6 @@ class MATOM():
             for agent_index, agent_reward in enumerate(rew_array):
                 agent_rewards[agent_index][0] += agent_reward
 
-            
             for trainer in self.agents:
                 prev_beliefs = trainer.prev_beliefs # needs to be called before augment observation 
                 prev_act = trainer.prev_acts[trainer.agent_index]
@@ -87,11 +86,9 @@ class MATOM():
                 trainer_obs = trainers_obs[trainer_index]
                 trainer_new_obs = env.observe(agent=trainer.agent_key)['observation']
                 trainer_new_obs = trainer.augment_observation(trainer_new_obs)
-                rep = trainers_reps[trainer_index] 
-                next_rep = trainer.attention_rep(current_agent_index, trainer_new_obs, mask)
 
                 if(train):
-                    trainer.observe(current_agent_index,trainer_obs,trainer_new_obs,rep,next_rep,action,prev_act,prev_beliefs,mask,rew,done,player_info)
+                    trainer.observe(current_agent_index,trainer_obs,trainer_new_obs,action,prev_act,prev_beliefs,mask,rew,done,player_info)
                     trainer._on_step()
             
             if(all(done_n.values())): # game is over
@@ -146,6 +143,7 @@ class TOM():
         self.prev_acts    = self.num_actions  * np.zeros((len(self.env.agents), 1))  
 
         if(load_path is not None):
+            # get this list from folder 
             mind_load_paths = [ load_path + '/minds/player_0/',
                                 load_path + '/minds/player_1/',
                                 load_path + '/minds/player_2/',
@@ -217,9 +215,9 @@ class TOM():
         self.prev_beliefs = prev_beliefs
         return obs
 
-    def observe(self,trainer_index,obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos):
+    def observe(self,trainer_index,obs,next_obs,action,prev_act,prev_belief,mask,reward,done,infos):
         self.prev_acts[trainer_index]  = action
-        self.agent_models[trainer_index].observe(obs,next_obs,rep,next_rep,action,prev_act,prev_belief,mask,reward,done,infos)
+        self.agent_models[trainer_index].observe(obs,next_obs,action,prev_act,prev_belief,mask,reward,done,infos)
 
     def predict(self, obs, mask, training=True):
         sample = random.random()

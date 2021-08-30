@@ -67,6 +67,7 @@ def get_compressed_obs(env, obs, attention_idxs, attention_vals):
         return compressed_obs
     
     if("liars_dice" in str(env)):
+        # redo this without numpy, slows down 
         my_hand_idx = env.unwrapped.num_sides * env.unwrapped.num_dice
         my_hand = obs[0:my_hand_idx]
         others_hands = obs[env.unwrapped.act_shape+my_hand_idx-1:len(obs)]
