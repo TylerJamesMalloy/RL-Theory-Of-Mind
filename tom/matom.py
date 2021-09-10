@@ -224,6 +224,36 @@ class TOM():
         eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
             math.exp(-1. * self.steps_done / self.eps_decay)
         self.steps_done += 1
+
+        if self.model_type == "low":
+            # lowest possible bid version
+            if (sample > .95 or np.sum(mask) == 1) and mask[0] == 1:
+                action = 0
+            else:
+                action = list(mask)[1:len(mask)].index(1) + 1
+
+            return(action, None)
+        
+        if self.model_type == "fav":
+            # favourite number version
+            dice = obs[0:36]
+            dice = dice.reshape(6,6)
+            dice = np.sum(dice, axis=0)
+            most_common = np.argmax(dice)
+            mask = np.delete(mask, 0)
+            mask = mask.reshape(6,24)
+            my_mask = mask[most_common]
+            if(np.sum(my_mask) == 0):
+                return (0, None) # no more of my fav number bets
+            action = list(my_mask).index(1) 
+            action = action + (most_common * 24) + 1
+            return(action, None)
+        
+        if self.model_type == "up":
+            print(mask)
+            print(self.env.unwrapped.possible_bids)
+            assert(False)
+
         
         if sample < eps_threshold or self.model_type == "random":
             actions = np.linspace(0,len(mask)-1,num=len(mask), dtype=np.int32)
