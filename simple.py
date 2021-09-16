@@ -1,5 +1,5 @@
 from pettingzoo.tom import liars_dice_v0, commune_v0
-from pettingzoo.classic import mahjong_v4
+from pettingzoo.classic import mahjong_v4, texas_holdem_no_limit_v5
 from tom.matom import MATOM
 import numpy as np
 import torch as th 
@@ -13,7 +13,7 @@ parser = argparse.ArgumentParser(description='Options for Multi-Agent Theory of 
 parser.add_argument('--model_type', default='full', type=str, help='full, attention, belief, dqn')
 parser.add_argument('--folder', default='./', type=str, help='Location to save all agent models')
 parser.add_argument('--environment', default='liars_dice', type=str, help='Environment to train agents in')
-parser.add_argument('--timesteps', default=100000, type=int, help='Timesteps for training')
+parser.add_argument('--timesteps', default=1000, type=int, help='Timesteps for training')
 parser.add_argument('--compare', default=False, type=bool, help='Timesteps for training')
 parser.add_argument('--first_folder', default='./', type=str, help='first load model location')
 parser.add_argument('--second_folder', default='./', type=str, help='second load model location')
@@ -21,9 +21,7 @@ parser.add_argument('--num_players', default=2, type=int, help='number of models
 
 args = parser.parse_args()
 
-env = commune_v0.env(num_players=args.num_players)
-env.reset()
-
+env = liars_dice_v0.env(num_players=4)
 
 if(args.compare):
     agent1 = args.second_folder  + "/player_player_0/"

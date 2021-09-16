@@ -7,7 +7,7 @@ from gym import spaces
 from tqdm import tqdm
 from torch.nn import functional as F
 from tom.utils.tom import MindModel
-from tom.utils.utils import get_unobserved_shape, get_concatonated_shape, get_belief_shape
+from tom.utils.utils import Helper
 
 class MATOM():
     def __init__(self, env, model_type="full", attention_size=20, load_models=False, load_paths=None, load_types=None):
@@ -15,6 +15,7 @@ class MATOM():
         self.env = env 
         agents = []
         self.model_type = model_type # full, attention, belief, dqn
+        self.helper = Helper(env = env)
 
         if(load_models):
             for agent_index, agent_key in enumerate(env.agents):
@@ -84,6 +85,7 @@ class MATOM():
                 prev_act = trainer.prev_acts[trainer.agent_index]
                 trainer_index = env.agents.index(trainer.agent_key)
                 trainer_obs = trainers_obs[trainer_index]
+
                 trainer_new_obs = env.observe(agent=trainer.agent_key)['observation']
                 trainer_new_obs = trainer.augment_observation(trainer_new_obs)
 
@@ -124,6 +126,7 @@ class TOM():
                     model_type="full",
                     load_path=None):
         self.env = env
+        self.helper = Helper(env = env)
         
         self.model_type = model_type
         self.agent_key = agent_key
@@ -138,9 +141,6 @@ class TOM():
         self.device = th.device("cuda" if th.cuda.is_available() else "cpu")
         self.num_actions = len(env.observe(agent=agent_key)['action_mask']) + 1 # last additional action signifies no previous action
         self.load_path = load_path
-        
-        self.prev_beliefs = np.zeros((len(self.env.agents), get_belief_shape(self.env)[1]))
-        self.prev_acts    = self.num_actions  * np.zeros((len(self.env.agents), 1))  
 
         if(load_path is not None):
             # get this list from folder 
@@ -151,8 +151,8 @@ class TOM():
 
             for tom_agent_index, tom_agent_key in enumerate(env.agents):
                 model = MindModel(env, 
-                            observation_space=get_concatonated_shape(env), #env.observation_spaces[tom_agent_key]['observation'],
-                            action_space=env.action_spaces[tom_agent_key],
+                            observation_space=observation_space,
+                            action_space=action_space,
                             attention_size=attention_size,
                             dqn_layers=dqn_layers,
                             gamma=self.gamma,
@@ -166,8 +166,8 @@ class TOM():
         else:
             for tom_agent_index, tom_agent_key in enumerate(env.agents):
                 model = MindModel(env, 
-                            observation_space=get_concatonated_shape(env), #env.observation_spaces[tom_agent_key]['observation'],
-                            action_space=env.action_spaces[tom_agent_key],
+                            observation_space=observation_space.shape,
+                            action_space=action_space,
                             attention_size=attention_size,
                             dqn_layers=dqn_layers,
                             gamma=self.gamma,
@@ -178,6 +178,13 @@ class TOM():
                 self.agent_models.append(model)
         
         self.mindModel = self.agent_models[self.agent_index]
+
+        prev_beliefs = []
+        for agent in self.agent_models:
+            belief = agent.predict_beliefs(None, None)
+            prev_beliefs.append(belief.flatten())
+        self.prev_beliefs = prev_beliefs #np.zeros((len(self.env.agents), self.helper.get_unobserved_shape())) 
+        self.prev_acts    = self.num_actions  * np.zeros((len(self.env.agents), 1))  
     
     def save(self, folder):
         for model_index, model in enumerate(self.agent_models):
@@ -193,7 +200,11 @@ class TOM():
             return self.agent_models[trainer_index].attention_rep(obs, unseen_mask)
 
     def reset(self):
-        self.prev_beliefs = np.zeros((len(self.env.agents), get_belief_shape(self.env)[1]))
+        prev_beliefs = []
+        for agent in self.agent_models:
+            belief = agent.predict_beliefs(None, None)
+            prev_beliefs.append(belief.flatten())
+        self.prev_beliefs = prev_beliefs #np.zeros((len(self.env.agents), self.helper.get_unobserved_shape())) 
         self.prev_acts    = self.num_actions * np.zeros((len(self.env.agents), 1))
         return 
         
@@ -208,8 +219,9 @@ class TOM():
         for agent_index, agent in enumerate(self.agent_models):
             prev_act = np.zeros(self.num_actions)  
             prev_act[int(self.prev_acts[agent_index][0])] = 1
+
             belief = agent.predict_beliefs(self.prev_beliefs[agent_index], prev_act)
-            belief = np.reshape(belief, get_unobserved_shape(self.env)) 
+            belief = np.reshape(belief, self.helper.get_unobserved_shape()) 
             prev_beliefs.append(belief.flatten())
             obs = np.append(obs, belief, axis=0)
         self.prev_beliefs = prev_beliefs

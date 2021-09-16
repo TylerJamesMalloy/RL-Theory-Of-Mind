@@ -13,7 +13,7 @@ import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from tom.utils.utils import * #get_attention_shape, get_compressed_obs, get_input_shape, get_belief_shape, get_unobserved_shape
+from tom.utils.utils import Helper
 
 class MLP(nn.Module):
     def __init__(self,
@@ -102,6 +102,7 @@ class MindModel():
     ):
 
         self.env = env
+        self.helper = Helper(env)
         self.observation_space = observation_space
         self.action_space = action_space
         self.attention_size = attention_size
@@ -115,8 +116,8 @@ class MindModel():
         self.batch_size = 64
         self.target_update = 10
 
-        input_size = get_input_shape(env=env, attention_size=attention_size, model_type=self.model_type)
-        belief_shape = (len(self.env.agents), get_belief_shape(env=env)[1])
+        input_size = self.helper.get_input_shape(attention_size=attention_size, model_type=self.model_type)
+        belief_shape = (len(self.env.agents), self.helper.get_unobserved_shape())
 
         buffer_obs_space = spaces.Box(low=0,high=1, shape=observation_space, dtype=np.int32)
         self.replay_buffer = ReplayBuffer(  buffer_size=int(1e5), 
@@ -129,12 +130,13 @@ class MindModel():
         self.target_net = DQN(input_shape=input_size, output_shape=action_space.n, layers=dqn_layers, device=self.device)
 
         attention_input = self.obs_shape + action_space.n
-        attention_output = get_attention_shape(env=env)
+        attention_output = self.helper.get_attention_output(model_type=self.model_type)
         self.attention = AttentionModel(input_shape=attention_input, output_shape=attention_output, layers=dqn_layers, attention_size=attention_size, device=self.device)
 
-        self.belief_shape, self.belief_output = get_belief_shape(env=env)
-        belief_input = sum(list(self.belief_shape))
-        self.belief = BeliefModel(input_shape=belief_input, output_shape=self.belief_output, layers=dqn_layers, device=self.device)
+        self.action_shape = action_space.n
+        self.belief_shape = self.helper.get_unobserved_shape() + action_space.n
+        self.belief_output = self.helper.get_unobserved_shape()
+        self.belief = BeliefModel(input_shape=self.belief_shape, output_shape=self.belief_output, layers=dqn_layers, device=self.device)
 
         if(load_path is not None):
             self.belief.load(load_path + "belief") 
@@ -158,9 +160,9 @@ class MindModel():
 
         self.optimizer = optim.RMSprop(self.all_parameters)
 
-        self.unobserved_shape = get_unobserved_shape(env=env)
-        self.prev_belief = np.zeros(self.belief_shape[0]) # size of belief space 
-        self.prev_action = np.zeros(self.belief_shape[1]) # size of action space
+        self.unobserved_shape = self.helper.get_unobserved_shape()
+        self.prev_belief = np.zeros(self.belief_shape) # size of belief space 
+        self.prev_action = np.zeros(self.action_shape) # size of action space
 
         self.training_step = 0
     
@@ -168,7 +170,7 @@ class MindModel():
         attention = self.predict_attention(obs, mask).data.cpu().numpy()
         top_n_idx = np.argsort(attention)[-self.attention_size:]  
         top_n_val = attention[top_n_idx]  
-        return get_compressed_obs(env=self.env, obs=obs, attention_idxs=top_n_idx, attention_vals=top_n_val)
+        return self.helper.get_compressed_obs(obs=obs, attention_idxs=top_n_idx, attention_vals=top_n_val)
 
     def q_values(self, obs, mask):
         if(self.model_type == "full" or self.model_type == "attention"):
@@ -190,6 +192,9 @@ class MindModel():
         self.replay_buffer.add(obs,next_obs,action,prev_act,prev_belief,mask,reward,done,infos)
     
     def predict_beliefs(self, prev_belief, prev_action):
+        if(prev_belief is None and prev_action is None):
+            return self.helper.get_belief(None, agent=self.agent_index)
+
         prev_belief = th.from_numpy(prev_belief).flatten()
         prev_action = th.from_numpy(prev_action) 
 
@@ -198,6 +203,7 @@ class MindModel():
         belief = belief.data.cpu().numpy() # should this be tensor or numpy 
         # reshape to shape of unobnserved
         belief = np.reshape(belief, self.unobserved_shape)
+        belief = self.helper.get_belief(belief, agent=self.agent_index)
 
         return belief
     
@@ -248,7 +254,7 @@ class MindModel():
             ##### get attention ######
             attention_input = th.cat((obs.flatten(start_dim=1), masks), 1)
             attentions = self.attention.model(attention_input.float()) # Get index of top K attentions 
-            obs = get_compressed(self.env, attentions, obs, self.attention_size, self.device)
+            obs = self.helper.get_compressed(attentions, obs, self.attention_size, self.device)
 
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
@@ -268,7 +274,7 @@ class MindModel():
         next_attentions = self.attention.model(next_attention_input.float())
 
         if(self.model_type == "full" or self.model_type == "attention"):
-            next_obs = get_compressed(self.env, next_attentions, non_final_next_obs, self.attention_size, self.device) # This is all torch operations so it remains on the graph 
+            next_obs = self.helper.get_compressed(next_attentions, non_final_next_obs, self.attention_size, self.device) # This is all torch operations so it remains on the graph 
 
         next_state_values[non_final_mask] = self.target_net.predict(next_obs).max(1).values.detach() 
         # Compute the expected Q values
